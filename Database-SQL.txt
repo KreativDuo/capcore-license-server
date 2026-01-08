@@ -1,0 +1,37 @@
+CREATE TABLE `verification` (
+  `customer_id`          BIGINT UNSIGNED            NOT NULL,
+  `product_id`           BIGINT UNSIGNED            NOT NULL,
+  `purchase_code`        VARCHAR(128)               NOT NULL,
+  `purchase_code_origin` VARCHAR(32)                NOT NULL DEFAULT 'envato',
+  `domain`               VARCHAR(253)               NOT NULL,
+  `server_real_ip`       VARCHAR(45)                NOT NULL,  -- IPv4/IPv6
+  `domain_admin_email`   VARCHAR(254)               NOT NULL,  -- RFC max
+  `supported_until`      DATETIME                   NULL,
+  `revoke_domain`        TINYINT(1) UNSIGNED        NOT NULL DEFAULT 0,
+
+  -- Eindeutigkeit pro Purchase-Code + Domain (typisch für Lizenzbindung)
+  UNIQUE KEY `uniq_purchase_domain` (`purchase_code`, `domain`),
+
+  -- Schnelle Lookups je nach Use-Case
+  KEY `idx_customer_product` (`customer_id`, `product_id`),
+  KEY `idx_purchase_code` (`purchase_code`),
+  KEY `idx_domain` (`domain`),
+  KEY `idx_supported_until` (`supported_until`)
+)
+ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_520_ci;
+
+
+CREATE TABLE `envato_purchase_codes` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `purchase_code` VARCHAR(100) NOT NULL,
+  `product_name` VARCHAR(255) NOT NULL,
+  `product_id` INT UNSIGNED NOT NULL,
+  `buyer` VARCHAR(255) NOT NULL,
+  `license` VARCHAR(100) NOT NULL,
+  `supported_until` DATETIME DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `purchase_code_unique` (`purchase_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
