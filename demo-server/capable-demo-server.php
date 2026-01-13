@@ -80,126 +80,115 @@ class Capable_Demo_Server {
 
 
     /**
-     * Sanitize Request Data
-     */
+	 * Sanitize Request Data
+	 * * Validates parameters, verifies license status via Capable_License,
+	 * and enforces product-specific access control based on the global product map.
+	 *
+	 * @return void
+	 */
+	protected function sanitize_request_data() {
+		global $license, $db;
 
-    protected function sanitize_request_data() {
+		// Handle stats and installation recording
+		if ( isset( $_GET['request_file_stats'] ) ) {
+			$this->global_stats();
+		}
 
-        global $license;
+		if ( isset( $_GET['action'] ) && ( $_GET['action'] == 'record_demo_installation' ) ) {
+			$this->record_installation();
+		}
 
-        // show global stats
-        if( isset( $_GET['request_file_stats'] ) ) {
+		// Retrieve parameters from the request
+		$purchase_code = $_GET['purchase_code'] ?? '';
+		$product_slug  = $_GET['product'] ?? '';
+		$domain        = $_GET['domain'] ?? '';
+		$action        = $_GET['action'] ?? '';
+		$file_slug     = $_GET['file'] ?? '';
 
-            $this->global_stats();
+		// Validate presence of required license parameters
+		if ( empty( $purchase_code ) || empty( $product_slug ) ) {
+			header( 'Content-Type: application/json' );
+			echo json_encode( array(
+				'result' => 'access_denied',
+				'reason' => PURCHASE_CODE_EMPTY
+			) );
+			die();
+		}
 
-        }
+		// Check license validity using the centralized license class
+		$license->set_purchase_code( $purchase_code, $domain );
+		$license->set_license_status();
 
-        // record if installation is processed
-        if( isset( $_GET['action'] ) && ( $_GET['action'] == 'record_demo_installation' ) ) {
+		if ( ! $license->license_valid ) {
+			header( 'Content-Type: application/json' );
+			echo json_encode( array(
+				'result' => 'access_denied',
+				'reason' => $license->license_info
+			) );
+			die();
+		}
 
-            $this->record_installation();
+		/**
+		 * Secure Multi-Product Validation
+		 * * Verify that the requested product exists in our configuration and
+		 * that the purchase code is authorized for this specific item.
+		 */
+		$product_map = defined( 'CAPABLE_PRODUCT_MAP' ) ? CAPABLE_PRODUCT_MAP : array();
 
-        }
+		if ( ! isset( $product_map[ $product_slug ] ) ) {
+			header( 'Content-Type: application/json' );
+			echo json_encode( array(
+				'result' => 'access_denied',
+				'reason' => 'The requested product is not registered on this server.'
+			) );
+			die();
+		}
 
-        // sanitize file name first
-        if( isset( $_GET['file'] ) && in_array( $_GET['file'], $this->allowed_request_file_names ) ) {
+		/**
+		 * Envato Item ID Verification
+		 * * If the product is not in 'pending' mode, verify that the purchase code
+		 * belongs to the correct Envato Item ID in our database.
+		 */
+		if ( $product_map[ $product_slug ] !== 'pending' ) {
+			$db->where( 'purchase_code', $purchase_code );
+			$db_record = $db->getOne( 'envato_purchase_codes' );
 
-            $this->request_file = $_GET['file'];
+			if ( ! $db_record || $db_record['product_id'] != $product_map[ $product_slug ] ) {
+				header( 'Content-Type: application/json' );
+				echo json_encode( array(
+					'result' => 'access_denied',
+					'reason' => 'License is valid, but not for the requested product.'
+				) );
+				die();
+			}
+		}
 
-        } else {
+		// Set the authorized file slug for subsequent processing methods
+		$this->request_file = $file_slug;
 
-            header('Content-Type: application/json');
-            echo '{"result" : "access_denied", "reason" : "' . FILE_NOT_FOUND . '"}';
-            die();
-
-        }
-
-        //  XML Request
-        if( isset( $_GET['action'] ) && (
-            $_GET['action'] == 'request_demo_xml' ||
-            $_GET['action'] == 'request_demo_widgets' ||
-            $_GET['action'] == 'request_demo_options' ||
-            $_GET['action'] == 'request_demo_sliders' ||
-            $_GET['action'] == 'request_demo_templates' ||
-            $_GET['action'] == 'request_premium_templates'
-        ) ) {
-
-            if( !empty( $_GET['purchase_code'] ) ) {
-
-                $license->set_purchase_code( $_GET['purchase_code'], $_GET['domain'] );
-                $license->set_license_status();
-
-                if( $license->license_valid ) {
-
-                    if( $_GET['action'] == 'request_demo_xml' ) {
-
-                        $this->process_xml();
-
-                    }
-
-                    if( $_GET['action'] == 'request_demo_templates' ) {
-
-                        $this->process_templates();
-
-                    }
-
-                    if( $_GET['action'] == 'request_demo_options' ) {
-
-                        $this->process_txt();
-
-                    }
-
-                    if( $_GET['action'] == 'request_demo_widgets' ) {
-
-                        $this->process_widgets();
-
-                    }
-
-                    if( $_GET['action'] == 'request_demo_sliders' && !empty( $_GET['slider'] )  ) {
-
-                        $this->process_sliders( $_GET['slider'] );
-
-                    }
-
-                } else {
-
-                    header('Content-Type: application/json');
-                    echo '{"result" : "access_denied", "reason" : "' . $license->license_info . '"}';
-                    die();
-
-                }
-
-            } else {
-
-                header('Content-Type: application/json');
-                echo '{"result" : "access_denied", "reason" : "' . PURCHASE_CODE_EMPTY . '"}';
-                die();
-
-            }
-
-        }
-
-        // sanitize file name extension
-        if( in_array( $_GET['kind'], $this->allowed_request_file_extensions ) ) {
-
-            $this->request_file_extension = $_GET['kind'];
-
-        } else {
-
-            die('Direct Downloads are disabled. You need a valid license.');
-
-        }
-
-
-
-
-
-        $_GET['purchase_code'];
-        $_GET['domain'];
-
-
-
-    }
+		// Process specific demo actions
+		if ( ! empty( $action ) ) {
+			switch ( $action ) {
+				case 'request_demo_xml':
+					$this->process_xml();
+					break;
+				case 'request_demo_templates':
+					$this->process_templates();
+					break;
+				case 'request_demo_options':
+					$this->process_txt();
+					break;
+				case 'request_demo_widgets':
+					$this->process_widgets();
+					break;
+				case 'request_demo_sliders':
+					if ( ! empty( $_GET['slider'] ) ) {
+						$this->process_sliders( $_GET['slider'] );
+					}
+					break;
+			}
+		}
+	}
 
 
     /**
@@ -262,7 +251,7 @@ class Capable_Demo_Server {
 
     protected function process_xml() {
 
-        $this->record_xml();
+        // $this->record_xml();
 
         header('Content-Type: text/xml; charset=utf-8');
         readfile( BASE_PATH . 'demo-server/xml/' . $this->request_file . '.xml' );
